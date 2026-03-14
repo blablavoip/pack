@@ -1,8 +1,6 @@
 /**
- * WA Checker — Baileys edition
- * Uses @whiskeysockets/baileys — connects to WhatsApp via WebSocket protocol
- * NO Chrome, NO Puppeteer, NO browser binary needed
- * Works on: Render, cPanel, any Node.js host
+ * WA Checker — Baileys edition v3
+ * No Chrome, no Puppeteer — pure WebSocket protocol
  */
 
 const express  = require('express');
@@ -29,34 +27,6 @@ const MAX_ACCOUNTS = 5;
 const SESSION_DIR  = path.resolve(__dirname, '.wa-session');
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 
-// Dynamic import for ESM baileys
-// baileys v6+ is pure ESM — all exports are named, there is no default export
-let makeWASocket, useMultiFileAuthState, DisconnectReason;
-
-async function loadBaileys() {
-  // Try new official package name first, fall back to @whiskeysockets/baileys
-  let baileys;
-  try {
-    baileys = await import('baileys');
-    console.log('Using package: baileys');
-  } catch {
-    baileys = await import('@whiskeysockets/baileys');
-    console.log('Using package: @whiskeysockets/baileys');
-  }
-
-  // All named exports — no default
-  makeWASocket          = baileys.makeWASocket;
-  useMultiFileAuthState = baileys.useMultiFileAuthState;
-  DisconnectReason      = baileys.DisconnectReason;
-
-  if (typeof makeWASocket !== 'function') {
-    // Dump all exports to help debug
-    console.error('makeWASocket not found. Available exports:', Object.keys(baileys).join(', '));
-    throw new Error('makeWASocket is not exported from baileys');
-  }
-  console.log('Baileys loaded ✓');
-}
-
 const accounts     = new Map();
 const beingCreated = new Set();
 
@@ -68,6 +38,54 @@ function nextFreeId() {
 let isChecking = false;
 let results    = [];
 let stats      = { valid: 0, invalid: 0, total: 0 };
+
+// ── Load baileys — handles all export shapes across versions ──────────────
+let makeWASocket, useMultiFileAuthState, DisconnectReason;
+
+async function loadBaileys() {
+  // Try both package names in order
+  const pkgs = ['baileys', '@whiskeysockets/baileys'];
+  let mod = null;
+
+  for (const pkg of pkgs) {
+    try {
+      mod = await import(pkg);
+      console.log(`[baileys] Using package: ${pkg}`);
+      break;
+    } catch (e) {
+      console.log(`[baileys] ${pkg} not available: ${e.code || e.message}`);
+    }
+  }
+
+  if (!mod) throw new Error('Baileys not installed. Run: npm install baileys');
+
+  // Log all exports to help debug if something is wrong
+  const keys = Object.keys(mod);
+  console.log('[baileys] Available exports:', keys.slice(0, 25).join(', '));
+
+  // Handle all known export shapes:
+  //   v6.x named:   mod.makeWASocket
+  //   older CJS:    mod.default.makeWASocket
+  //   default fn:   mod.default (the function itself)
+  makeWASocket = mod.makeWASocket
+    ?? mod.default?.makeWASocket
+    ?? (typeof mod.default === 'function' ? mod.default : null);
+
+  if (typeof makeWASocket !== 'function') {
+    throw new Error(
+      `makeWASocket not found in baileys exports.\nAvailable: ${keys.join(', ')}`
+    );
+  }
+
+  useMultiFileAuthState = mod.useMultiFileAuthState
+    ?? mod.default?.useMultiFileAuthState;
+
+  DisconnectReason = mod.DisconnectReason
+    ?? mod.default?.DisconnectReason
+    ?? {};
+
+  console.log('[baileys] Loaded ✓ makeWASocket:', typeof makeWASocket);
+}
 
 // ── Broadcast ─────────────────────────────────────────────────────────────
 function broadcast() {
@@ -82,15 +100,12 @@ function broadcast() {
   });
 }
 
-function sessionPath(id) {
-  return path.join(SESSION_DIR, `account-${id}`);
-}
+function sessionPath(id) { return path.join(SESSION_DIR, `account-${id}`); }
 
 function deleteSession(id) {
   try {
     const sp = sessionPath(id);
     if (fs.existsSync(sp)) fs.rmSync(sp, { recursive: true, force: true });
-    console.log(`[Account ${id}] Session deleted`);
   } catch {}
 }
 
@@ -98,8 +113,7 @@ function deleteSession(id) {
 async function createAccount(id) {
   if (accounts.has(id)) { beingCreated.delete(id); return; }
 
-  console.log(`[Account ${id}] Initializing (Baileys / no Chrome)...`);
-
+  console.log(`[Account ${id}] Initializing...`);
   const acc = { id, label: `Account ${id}`, sock: null, state: 'init', qr: null, loadingPct: null };
   accounts.set(id, acc);
   beingCreated.delete(id);
@@ -110,8 +124,6 @@ async function createAccount(id) {
     if (!fs.existsSync(sp)) fs.mkdirSync(sp, { recursive: true });
 
     const { state: authState, saveCreds } = await useMultiFileAuthState(sp);
-
-    // Silent logger — avoids console spam
     const logger = pino({ level: 'silent' });
 
     const sock = makeWASocket({
@@ -122,14 +134,12 @@ async function createAccount(id) {
       defaultQueryTimeoutMs: 30000,
       keepAliveIntervalMs: 25000,
       browser: ['WA Checker', 'Chrome', '120.0.0'],
-      // Don't fetch full message history — faster connect
       syncFullHistory: false,
       markOnlineOnConnect: false,
     });
 
     acc.sock = sock;
 
-    // ── QR code ──────────────────────────────────────────────────────────
     sock.ev.on('connection.update', async (update) => {
       const { connection, lastDisconnect, qr } = update;
 
@@ -142,71 +152,47 @@ async function createAccount(id) {
         } catch {}
       }
 
-      if (connection === 'connecting') {
-        if (acc.state !== 'qr') {
-          acc.state = 'authenticated';
-          acc.qr    = null;
-          broadcast();
-        }
+      if (connection === 'connecting' && acc.state !== 'qr') {
+        acc.state = 'authenticated'; acc.qr = null; broadcast();
       }
 
       if (connection === 'open') {
         console.log(`[Account ${id}] READY ✓`);
-        acc.state = 'ready';
-        acc.qr    = null;
-        broadcast();
+        acc.state = 'ready'; acc.qr = null; broadcast();
         io.emit('toast', { msg: `Account ${id} connected!`, type: 'ok' });
       }
 
       if (connection === 'close') {
-        const code       = lastDisconnect?.error?.output?.statusCode;
-        const reason     = lastDisconnect?.error?.message || 'unknown';
-        const loggedOut  = code === DisconnectReason?.loggedOut || code === 401;
-
-        console.log(`[Account ${id}] Closed: ${reason} (code ${code})`);
-
-        if (loggedOut) {
-          // Removed from phone — delete session so next time shows fresh QR
-          acc.state = 'disconnected';
-          broadcast();
-          io.emit('toast', { msg: `Account ${id} logged out from phone`, type: 'err' });
-          deleteSession(id);
-        } else if (acc.state !== 'removing') {
-          // Network/timeout disconnect — show disconnected, user can restart
-          acc.state = 'disconnected';
-          broadcast();
-          io.emit('toast', { msg: `Account ${id} disconnected`, type: 'err' });
-        }
+        const code      = lastDisconnect?.error?.output?.statusCode;
+        const loggedOut = code === DisconnectReason?.loggedOut || code === 401;
+        console.log(`[Account ${id}] Closed (code ${code})`);
+        acc.state = 'disconnected'; broadcast();
+        io.emit('toast', { msg: `Account ${id} disconnected`, type: 'err' });
+        if (loggedOut) deleteSession(id);
       }
     });
 
-    // Save credentials whenever they update
     sock.ev.on('creds.update', saveCreds);
 
   } catch (err) {
     console.error(`[Account ${id}] Init error: ${err.message}`);
-    acc.state = 'error';
-    broadcast();
+    acc.state = 'error'; broadcast();
   }
 }
 
-// ── Logout ────────────────────────────────────────────────────────────────
 async function logoutAccount(id) {
   const acc = accounts.get(id);
   if (!acc || acc.state === 'removing') return;
   acc.state = 'removing'; broadcast();
-  console.log(`[Account ${id}] Logging out...`);
-
   try {
     if (acc.sock) {
       await Promise.race([
         acc.sock.logout().catch(() => {}),
         new Promise(r => setTimeout(r, 5000)),
       ]);
-      await acc.sock.end(undefined).catch(() => {});
+      acc.sock.end?.();
     }
   } catch {}
-
   acc.sock = null;
   deleteSession(id);
   accounts.delete(id);
@@ -214,31 +200,27 @@ async function logoutAccount(id) {
   io.emit('toast', { msg: `Account ${id} logged out`, type: 'ok' });
 }
 
-// ── Restart account ───────────────────────────────────────────────────────
 async function restartAccount(id) {
   const acc = accounts.get(id);
   if (!acc) return;
   acc.state = 'init'; broadcast();
-  try { if (acc.sock) await acc.sock.end(undefined).catch(() => {}); } catch {}
+  try { acc.sock?.end?.(); } catch {}
   acc.sock = null;
   accounts.delete(id);
   setTimeout(() => createAccount(id), 2000);
 }
 
-// ── Check if number is on WhatsApp ────────────────────────────────────────
+// ── Check number ───────────────────────────────────────────────────────────
 async function checkNumber(raw, acc) {
   const cleaned = raw.replace(/\D/g, '').replace(/^0+/, '');
   if (cleaned.length < 7 || cleaned.length > 15)
     return { number: raw, cleaned, registered: false, error: 'Invalid length', account: acc.label };
-
   try {
-    // Baileys: onWhatsApp returns array of results
     const [result] = await acc.sock.onWhatsApp(cleaned + '@s.whatsapp.net');
-    const registered = result?.exists ?? false;
     return {
       number: raw, cleaned, e164: '+' + cleaned,
-      registered,
-      waLink: registered ? `https://wa.me/${cleaned}` : null,
+      registered: result?.exists ?? false,
+      waLink: result?.exists ? `https://wa.me/${cleaned}` : null,
       checkedAt: new Date().toISOString(), account: acc.label,
     };
   } catch (err) {
@@ -246,7 +228,6 @@ async function checkNumber(raw, acc) {
   }
 }
 
-// ── Process queue ─────────────────────────────────────────────────────────
 async function processQueue(numbers) {
   if (isChecking) return;
   const ready = Array.from(accounts.values()).filter(a => a.state === 'ready' && a.sock);
@@ -260,34 +241,25 @@ async function processQueue(numbers) {
     if (!isChecking) break;
     const num = numbers[i].trim(); if (!num) continue;
 
-    io.emit('progress', {
-      current: i + 1, total: numbers.length,
-      percent: Math.round(((i + 1) / numbers.length) * 100),
-    });
+    io.emit('progress', { current: i+1, total: numbers.length, percent: Math.round(((i+1)/numbers.length)*100) });
 
     let acc = null;
     for (let t = 0; t < ready.length; t++) {
       const c = ready[rrIndex % ready.length]; rrIndex++;
       if (c?.state === 'ready' && c.sock) { acc = c; break; }
     }
-
     if (!acc) {
       const r = { number: num, registered: false, error: 'No account', account: '—' };
-      results.push(r); stats.invalid++;
-      io.emit('result', { result: r, index: i, stats }); continue;
+      results.push(r); stats.invalid++; io.emit('result', { result: r, index: i, stats }); continue;
     }
-
     const result = await checkNumber(num, acc);
     results.push(result);
     if (result.registered) stats.valid++; else stats.invalid++;
     io.emit('result', { result, index: i, stats });
-
-    if (i < numbers.length - 1 && isChecking)
-      await new Promise(r => setTimeout(r, delay));
+    if (i < numbers.length - 1 && isChecking) await new Promise(r => setTimeout(r, delay));
   }
 
-  isChecking = false;
-  io.emit('done', { results, stats });
+  isChecking = false; io.emit('done', { results, stats });
   console.log(`Done — ${stats.valid}/${stats.total}`);
 }
 
@@ -299,7 +271,7 @@ app.get('/export', (req, res) => {
   const csv = ['Number,Cleaned,E164,On WhatsApp,WA Link,Account,Error,Checked At',
     ...results.map(r => [r.number, r.cleaned||'', r.e164||'', r.registered?'YES':'NO',
       r.waLink||'', r.account||'', r.error||'', r.checkedAt||'']
-      .map(v => `"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
+      .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(','))].join('\n');
   res.setHeader('Content-Type', 'text/csv');
   res.setHeader('Content-Disposition', 'attachment; filename="wa_results.csv"');
   res.send(csv);
@@ -308,18 +280,14 @@ app.get('/export', (req, res) => {
 // ── Sockets ───────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   broadcast();
-
   socket.on('add_account', async () => {
     if (accounts.size >= MAX_ACCOUNTS) return socket.emit('toast', { msg: `Max ${MAX_ACCOUNTS} accounts`, type: 'err' });
     const id = nextFreeId();
     if (!id || beingCreated.has(id)) return;
-    beingCreated.add(id);
-    await createAccount(id);
+    beingCreated.add(id); await createAccount(id);
   });
-
   socket.on('logout_account',  async ({ id }) => { await logoutAccount(parseInt(id)); });
   socket.on('restart_account', async ({ id }) => { await restartAccount(parseInt(id)); });
-
   socket.on('check', ({ numbers }) => {
     if (!Array.from(accounts.values()).some(a => a.state === 'ready'))
       return socket.emit('error_msg', { message: 'No accounts connected.' });
@@ -327,21 +295,18 @@ io.on('connection', (socket) => {
     if (!numbers?.length) return socket.emit('error_msg', { message: 'No numbers.' });
     processQueue(numbers);
   });
-
   socket.on('stop', () => { isChecking = false; io.emit('toast', { msg: 'Stopped', type: 'ok' }); });
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-
 loadBaileys().then(() => {
   server.listen(PORT, () => {
     console.log(`\nWA Checker (Baileys) → http://localhost:${PORT}`);
-    console.log('No Chrome required — uses WhatsApp WebSocket protocol\n');
     createAccount(1);
   });
 }).catch(err => {
-  console.error('Failed to load Baileys:', err.message);
+  console.error('Fatal:', err.message);
   process.exit(1);
 });
 
