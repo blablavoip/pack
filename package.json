@@ -1,7 +1,7 @@
 {
   "name": "wa-checker",
   "version": "1.0.0",
-  "description": "Real WhatsApp number validator — works on Windows, Render, cPanel",
+  "description": "Real WhatsApp number validator",
   "main": "app.js",
   "scripts": {
     "start": "node app.js",
