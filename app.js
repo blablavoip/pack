@@ -1,6 +1,7 @@
 /**
- * WA Checker — whatsapp-web.js + puppeteer bundled Chromium
- * Works on Render, cPanel, Windows — no system Chrome needed
+ * WA Checker — Docker edition
+ * Uses ghcr.io/puppeteer/puppeteer image which has Chrome pre-installed
+ * No downloads, no apt-get, no build hangs
  */
 
 const express  = require('express');
@@ -39,41 +40,32 @@ let isChecking = false;
 let results    = [];
 let stats      = { valid: 0, invalid: 0, total: 0 };
 
-// ── Find Chrome — puppeteer bundled first, then system ────────────────────
+// ── Find Chrome ────────────────────────────────────────────────────────────
+// In the puppeteer Docker image, Chrome is at a known path
 function findChrome() {
-  // 1. Puppeteer's own bundled Chromium (installed via npm)
-  //    This is the most reliable on Render / any Linux server
-  try {
-    const p    = require('puppeteer');
-    const bin  = p.executablePath();
-    if (bin && fs.existsSync(bin)) {
-      console.log('[Chrome] puppeteer bundled:', bin);
-      return bin;
-    }
-  } catch {}
-
-  // 2. System Chrome (Windows local dev / cPanel / VPS)
-  const local = process.env.LOCALAPPDATA || '';
-  const paths = [
-    process.env.CHROME_PATH,
+  const candidates = [
+    // puppeteer Docker image path (ghcr.io/puppeteer/puppeteer)
     '/usr/bin/google-chrome-stable',
     '/usr/bin/google-chrome',
     '/usr/bin/chromium-browser',
     '/usr/bin/chromium',
+    // Try puppeteer's executablePath as fallback
+    (() => { try { return require('puppeteer').executablePath(); } catch { return null; } })(),
+    (() => { try { return require('puppeteer-core').executablePath(); } catch { return null; } })(),
+    // Windows local dev
     'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    local + '\\Google\\Chrome\\Application\\chrome.exe',
+    (process.env.LOCALAPPDATA||'') + '\\Google\\Chrome\\Application\\chrome.exe',
     'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
     'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    local + '\\Microsoft\\Edge\\Application\\msedge.exe',
+    (process.env.LOCALAPPDATA||'') + '\\Microsoft\\Edge\\Application\\msedge.exe',
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   ].filter(Boolean);
 
-  for (const p of paths) {
-    try { if (fs.existsSync(p)) { console.log('[Chrome] system:', p); return p; } } catch {}
+  for (const p of candidates) {
+    try { if (p && fs.existsSync(p)) { console.log('[Chrome]', p); return p; } } catch {}
   }
 
-  // 3. PATH lookup
   try {
     const { execSync } = require('child_process');
     const cmd = process.platform === 'win32'
@@ -107,8 +99,7 @@ function deleteSession(id) {
 }
 
 async function destroyBrowser(id, deleteSess = false) {
-  const acc = accounts.get(id);
-  if (!acc) return;
+  const acc = accounts.get(id); if (!acc) return;
   const client = acc.client; acc.client = null;
   if (client) {
     try { client.removeAllListeners(); } catch {}
@@ -139,8 +130,8 @@ function createAccount(id) {
   const chromePath = findChrome();
   if (!chromePath) {
     beingCreated.delete(id);
-    io.emit('toast', { msg: 'Chrome not found. Make sure puppeteer is in dependencies.', type: 'err' });
-    console.error('[Error] No Chrome found. Add "puppeteer" to package.json dependencies.');
+    console.error('[Error] Chrome not found! Are you using the puppeteer Docker image?');
+    io.emit('toast', { msg: 'Chrome not found in container', type: 'err' });
     return;
   }
 
@@ -149,10 +140,7 @@ function createAccount(id) {
   accounts.set(id, acc); beingCreated.delete(id); broadcast();
 
   const client = new Client({
-    authStrategy: new LocalAuth({
-      clientId: `wa-account-${id}`,
-      dataPath: SESSION_DIR,
-    }),
+    authStrategy: new LocalAuth({ clientId: `wa-account-${id}`, dataPath: SESSION_DIR }),
     puppeteer: {
       headless: true,
       executablePath: chromePath,
@@ -254,7 +242,6 @@ async function processQueue(numbers) {
   if (isChecking) return;
   const ready = Array.from(accounts.values()).filter(a => a.state === 'ready' && a.client);
   if (!ready.length) { io.emit('error_msg', { message: 'No connected accounts.' }); return; }
-
   isChecking = true; results = []; stats = { valid: 0, invalid: 0, total: numbers.length };
   let rrIndex = 0;
   const delay = Math.max(400, Math.floor(1200 / ready.length));
@@ -263,7 +250,6 @@ async function processQueue(numbers) {
     if (!isChecking) break;
     const num = numbers[i].trim(); if (!num) continue;
     io.emit('progress', { current: i+1, total: numbers.length, percent: Math.round(((i+1)/numbers.length)*100) });
-
     let acc = null;
     for (let t = 0; t < ready.length; t++) {
       const c = ready[rrIndex % ready.length]; rrIndex++;
@@ -279,9 +265,7 @@ async function processQueue(numbers) {
     io.emit('result', { result, index: i, stats });
     if (i < numbers.length - 1 && isChecking) await new Promise(r => setTimeout(r, delay));
   }
-
   isChecking = false; io.emit('done', { results, stats });
-  console.log(`Done — ${stats.valid}/${stats.total}`);
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────
@@ -298,7 +282,6 @@ app.get('/export', (req, res) => {
   res.send(csv);
 });
 
-// ── Sockets ───────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   broadcast();
   socket.on('add_account', () => {
@@ -309,8 +292,7 @@ io.on('connection', (socket) => {
   });
   socket.on('logout_account',  async ({ id }) => { await logoutAccount(parseInt(id)); });
   socket.on('restart_account', async ({ id }) => {
-    const numId = parseInt(id);
-    const acc = accounts.get(numId); if (!acc) return;
+    const numId = parseInt(id); const acc = accounts.get(numId); if (!acc) return;
     acc.state = 'init'; broadcast();
     await destroyBrowser(numId, false); accounts.delete(numId);
     setTimeout(() => createAccount(numId), 2500);
@@ -325,14 +307,12 @@ io.on('connection', (socket) => {
   socket.on('stop', () => { isChecking = false; io.emit('toast', { msg: 'Stopped', type: 'ok' }); });
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`\nWA Checker → http://localhost:${PORT}`);
-  // Log chrome path immediately so it's visible in deploy logs
   const chrome = findChrome();
   if (chrome) console.log(`[Chrome] Using: ${chrome}`);
-  else console.error('[Chrome] NOT FOUND — add puppeteer to package.json');
+  else console.error('[Chrome] NOT FOUND');
   createAccount(1);
 });
 
