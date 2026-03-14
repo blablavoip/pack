@@ -30,16 +30,30 @@ const SESSION_DIR  = path.resolve(__dirname, '.wa-session');
 if (!fs.existsSync(SESSION_DIR)) fs.mkdirSync(SESSION_DIR, { recursive: true });
 
 // Dynamic import for ESM baileys
-let makeWASocket, useMultiFileAuthState, DisconnectReason, makeCacheableSignalKeyStore;
+// baileys v6+ is pure ESM — all exports are named, there is no default export
+let makeWASocket, useMultiFileAuthState, DisconnectReason;
 
 async function loadBaileys() {
-  const baileys = await import('@whiskeysockets/baileys');
-  makeWASocket             = baileys.default || baileys.makeWASocket;
-  useMultiFileAuthState    = baileys.useMultiFileAuthState;
-  DisconnectReason         = baileys.DisconnectReason;
-  makeCacheableSignalKeyStore = baileys.makeCacheableSignalKeyStore;
-  // Handle different export shapes
-  if (!makeWASocket && baileys.makeWASocket) makeWASocket = baileys.makeWASocket;
+  // Try new official package name first, fall back to @whiskeysockets/baileys
+  let baileys;
+  try {
+    baileys = await import('baileys');
+    console.log('Using package: baileys');
+  } catch {
+    baileys = await import('@whiskeysockets/baileys');
+    console.log('Using package: @whiskeysockets/baileys');
+  }
+
+  // All named exports — no default
+  makeWASocket          = baileys.makeWASocket;
+  useMultiFileAuthState = baileys.useMultiFileAuthState;
+  DisconnectReason      = baileys.DisconnectReason;
+
+  if (typeof makeWASocket !== 'function') {
+    // Dump all exports to help debug
+    console.error('makeWASocket not found. Available exports:', Object.keys(baileys).join(', '));
+    throw new Error('makeWASocket is not exported from baileys');
+  }
   console.log('Baileys loaded ✓');
 }
 
