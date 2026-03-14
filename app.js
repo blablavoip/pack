@@ -1,16 +1,16 @@
 /**
- * WA Checker — Baileys edition v3
- * No Chrome, no Puppeteer — pure WebSocket protocol
+ * WA Checker — whatsapp-web.js + puppeteer bundled Chromium
+ * Works on Render, cPanel, Windows — no system Chrome needed
  */
 
 const express  = require('express');
 const http     = require('http');
 const socketIO = require('socket.io');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode   = require('qrcode');
 const cors     = require('cors');
 const fs       = require('fs');
 const path     = require('path');
-const qrcode   = require('qrcode');
-const pino     = require('pino');
 
 const app    = express();
 const server = http.createServer(app);
@@ -39,52 +39,51 @@ let isChecking = false;
 let results    = [];
 let stats      = { valid: 0, invalid: 0, total: 0 };
 
-// ── Load baileys — handles all export shapes across versions ──────────────
-let makeWASocket, useMultiFileAuthState, DisconnectReason;
-
-async function loadBaileys() {
-  // Try both package names in order
-  const pkgs = ['baileys', '@whiskeysockets/baileys'];
-  let mod = null;
-
-  for (const pkg of pkgs) {
-    try {
-      mod = await import(pkg);
-      console.log(`[baileys] Using package: ${pkg}`);
-      break;
-    } catch (e) {
-      console.log(`[baileys] ${pkg} not available: ${e.code || e.message}`);
+// ── Find Chrome — puppeteer bundled first, then system ────────────────────
+function findChrome() {
+  // 1. Puppeteer's own bundled Chromium (installed via npm)
+  //    This is the most reliable on Render / any Linux server
+  try {
+    const p    = require('puppeteer');
+    const bin  = p.executablePath();
+    if (bin && fs.existsSync(bin)) {
+      console.log('[Chrome] puppeteer bundled:', bin);
+      return bin;
     }
+  } catch {}
+
+  // 2. System Chrome (Windows local dev / cPanel / VPS)
+  const local = process.env.LOCALAPPDATA || '';
+  const paths = [
+    process.env.CHROME_PATH,
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    local + '\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    local + '\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ].filter(Boolean);
+
+  for (const p of paths) {
+    try { if (fs.existsSync(p)) { console.log('[Chrome] system:', p); return p; } } catch {}
   }
 
-  if (!mod) throw new Error('Baileys not installed. Run: npm install baileys');
+  // 3. PATH lookup
+  try {
+    const { execSync } = require('child_process');
+    const cmd = process.platform === 'win32'
+      ? 'where chrome 2>nul || where msedge 2>nul'
+      : 'which google-chrome-stable 2>/dev/null || which google-chrome 2>/dev/null || which chromium-browser 2>/dev/null';
+    const p = execSync(cmd, { encoding: 'utf8', timeout: 3000 }).split('\n')[0].trim();
+    if (p && fs.existsSync(p)) { console.log('[Chrome] PATH:', p); return p; }
+  } catch {}
 
-  // Log all exports to help debug if something is wrong
-  const keys = Object.keys(mod);
-  console.log('[baileys] Available exports:', keys.slice(0, 25).join(', '));
-
-  // Handle all known export shapes:
-  //   v6.x named:   mod.makeWASocket
-  //   older CJS:    mod.default.makeWASocket
-  //   default fn:   mod.default (the function itself)
-  makeWASocket = mod.makeWASocket
-    ?? mod.default?.makeWASocket
-    ?? (typeof mod.default === 'function' ? mod.default : null);
-
-  if (typeof makeWASocket !== 'function') {
-    throw new Error(
-      `makeWASocket not found in baileys exports.\nAvailable: ${keys.join(', ')}`
-    );
-  }
-
-  useMultiFileAuthState = mod.useMultiFileAuthState
-    ?? mod.default?.useMultiFileAuthState;
-
-  DisconnectReason = mod.DisconnectReason
-    ?? mod.default?.DisconnectReason
-    ?? {};
-
-  console.log('[baileys] Loaded ✓ makeWASocket:', typeof makeWASocket);
+  return null;
 }
 
 // ── Broadcast ─────────────────────────────────────────────────────────────
@@ -100,114 +99,138 @@ function broadcast() {
   });
 }
 
-function sessionPath(id) { return path.join(SESSION_DIR, `account-${id}`); }
-
 function deleteSession(id) {
   try {
-    const sp = sessionPath(id);
+    const sp = path.join(SESSION_DIR, `session-wa-account-${id}`);
     if (fs.existsSync(sp)) fs.rmSync(sp, { recursive: true, force: true });
   } catch {}
 }
 
-// ── Create account ─────────────────────────────────────────────────────────
-async function createAccount(id) {
-  if (accounts.has(id)) { beingCreated.delete(id); return; }
-
-  console.log(`[Account ${id}] Initializing...`);
-  const acc = { id, label: `Account ${id}`, sock: null, state: 'init', qr: null, loadingPct: null };
-  accounts.set(id, acc);
-  beingCreated.delete(id);
-  broadcast();
-
-  try {
-    const sp = sessionPath(id);
-    if (!fs.existsSync(sp)) fs.mkdirSync(sp, { recursive: true });
-
-    const { state: authState, saveCreds } = await useMultiFileAuthState(sp);
-    const logger = pino({ level: 'silent' });
-
-    const sock = makeWASocket({
-      auth: authState,
-      logger,
-      printQRInTerminal: false,
-      connectTimeoutMs: 60000,
-      defaultQueryTimeoutMs: 30000,
-      keepAliveIntervalMs: 25000,
-      browser: ['WA Checker', 'Chrome', '120.0.0'],
-      syncFullHistory: false,
-      markOnlineOnConnect: false,
-    });
-
-    acc.sock = sock;
-
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        console.log(`[Account ${id}] QR ready`);
-        try {
-          acc.qr    = await qrcode.toDataURL(qr, { width: 260, margin: 2 });
-          acc.state = 'qr';
-          broadcast();
-        } catch {}
-      }
-
-      if (connection === 'connecting' && acc.state !== 'qr') {
-        acc.state = 'authenticated'; acc.qr = null; broadcast();
-      }
-
-      if (connection === 'open') {
-        console.log(`[Account ${id}] READY ✓`);
-        acc.state = 'ready'; acc.qr = null; broadcast();
-        io.emit('toast', { msg: `Account ${id} connected!`, type: 'ok' });
-      }
-
-      if (connection === 'close') {
-        const code      = lastDisconnect?.error?.output?.statusCode;
-        const loggedOut = code === DisconnectReason?.loggedOut || code === 401;
-        console.log(`[Account ${id}] Closed (code ${code})`);
-        acc.state = 'disconnected'; broadcast();
-        io.emit('toast', { msg: `Account ${id} disconnected`, type: 'err' });
-        if (loggedOut) deleteSession(id);
-      }
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-  } catch (err) {
-    console.error(`[Account ${id}] Init error: ${err.message}`);
-    acc.state = 'error'; broadcast();
+async function destroyBrowser(id, deleteSess = false) {
+  const acc = accounts.get(id);
+  if (!acc) return;
+  const client = acc.client; acc.client = null;
+  if (client) {
+    try { client.removeAllListeners(); } catch {}
+    try { await client.destroy(); } catch {}
   }
+  if (deleteSess) deleteSession(id);
 }
 
 async function logoutAccount(id) {
   const acc = accounts.get(id);
   if (!acc || acc.state === 'removing') return;
   acc.state = 'removing'; broadcast();
-  try {
-    if (acc.sock) {
-      await Promise.race([
-        acc.sock.logout().catch(() => {}),
-        new Promise(r => setTimeout(r, 5000)),
-      ]);
-      acc.sock.end?.();
-    }
-  } catch {}
-  acc.sock = null;
-  deleteSession(id);
-  accounts.delete(id);
-  broadcast();
+  if (acc.client) {
+    await Promise.race([
+      (async () => { try { await acc.client.logout(); } catch {} })(),
+      new Promise(r => setTimeout(r, 5000)),
+    ]);
+  }
+  await destroyBrowser(id, true);
+  accounts.delete(id); broadcast();
   io.emit('toast', { msg: `Account ${id} logged out`, type: 'ok' });
 }
 
-async function restartAccount(id) {
-  const acc = accounts.get(id);
-  if (!acc) return;
-  acc.state = 'init'; broadcast();
-  try { acc.sock?.end?.(); } catch {}
-  acc.sock = null;
-  accounts.delete(id);
-  setTimeout(() => createAccount(id), 2000);
+// ── Create account ─────────────────────────────────────────────────────────
+function createAccount(id) {
+  if (accounts.has(id)) { beingCreated.delete(id); return; }
+
+  const chromePath = findChrome();
+  if (!chromePath) {
+    beingCreated.delete(id);
+    io.emit('toast', { msg: 'Chrome not found. Make sure puppeteer is in dependencies.', type: 'err' });
+    console.error('[Error] No Chrome found. Add "puppeteer" to package.json dependencies.');
+    return;
+  }
+
+  console.log(`[Account ${id}] Initializing...`);
+  const acc = { id, label: `Account ${id}`, client: null, state: 'init', qr: null, loadingPct: null };
+  accounts.set(id, acc); beingCreated.delete(id); broadcast();
+
+  const client = new Client({
+    authStrategy: new LocalAuth({
+      clientId: `wa-account-${id}`,
+      dataPath: SESSION_DIR,
+    }),
+    puppeteer: {
+      headless: true,
+      executablePath: chromePath,
+      timeout: 120000,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--hide-scrollbars',
+        '--mute-audio',
+        '--disable-software-rasterizer',
+        '--disable-features=VizDisplayCompositor',
+      ],
+    },
+  });
+
+  acc.client = client;
+  let authOnce = false;
+
+  client.on('qr', async (qr) => {
+    if (acc.client !== client) return;
+    console.log(`[Account ${id}] QR ready`);
+    try {
+      acc.qr = await qrcode.toDataURL(qr, { width: 260, margin: 2 });
+      acc.state = 'qr'; acc.loadingPct = null; broadcast();
+    } catch {}
+  });
+
+  client.on('authenticated', () => {
+    if (acc.client !== client || authOnce) return; authOnce = true;
+    console.log(`[Account ${id}] Authenticated`);
+    acc.state = 'authenticated'; acc.qr = null; acc.loadingPct = 0; broadcast();
+  });
+
+  client.on('loading_screen', (percent) => {
+    if (acc.client !== client) return;
+    acc.state = 'loading'; acc.loadingPct = percent; broadcast();
+  });
+
+  client.on('ready', () => {
+    if (acc.client !== client) return;
+    console.log(`[Account ${id}] READY ✓`);
+    acc.state = 'ready'; acc.qr = null; acc.loadingPct = null; broadcast();
+    io.emit('toast', { msg: `Account ${id} connected!`, type: 'ok' });
+  });
+
+  client.on('auth_failure', () => {
+    if (acc.client !== client) return;
+    acc.state = 'error'; broadcast(); deleteSession(id);
+  });
+
+  client.on('disconnected', (reason) => {
+    if (acc.client !== client) return;
+    console.log(`[Account ${id}] Disconnected: ${reason}`);
+    acc.state = 'disconnected'; acc.loadingPct = null; broadcast();
+    io.emit('toast', { msg: `Account ${id} disconnected`, type: 'err' });
+    if (reason === 'LOGOUT') deleteSession(id);
+  });
+
+  client.initialize().catch((err) => {
+    if (acc.client !== client) return;
+    const msg = err.message || '';
+    if (msg.includes('already running') || msg.includes('userDataDir')) {
+      acc.state = 'error'; broadcast(); accounts.delete(id);
+      setTimeout(() => createAccount(id), 5000); return;
+    }
+    console.error(`[Account ${id}] Init error: ${msg}`);
+    acc.state = 'error'; broadcast();
+  });
 }
 
 // ── Check number ───────────────────────────────────────────────────────────
@@ -216,11 +239,10 @@ async function checkNumber(raw, acc) {
   if (cleaned.length < 7 || cleaned.length > 15)
     return { number: raw, cleaned, registered: false, error: 'Invalid length', account: acc.label };
   try {
-    const [result] = await acc.sock.onWhatsApp(cleaned + '@s.whatsapp.net');
+    const registered = await acc.client.isRegisteredUser(cleaned + '@c.us');
     return {
-      number: raw, cleaned, e164: '+' + cleaned,
-      registered: result?.exists ?? false,
-      waLink: result?.exists ? `https://wa.me/${cleaned}` : null,
+      number: raw, cleaned, e164: '+' + cleaned, registered,
+      waLink: registered ? `https://wa.me/${cleaned}` : null,
       checkedAt: new Date().toISOString(), account: acc.label,
     };
   } catch (err) {
@@ -230,23 +252,22 @@ async function checkNumber(raw, acc) {
 
 async function processQueue(numbers) {
   if (isChecking) return;
-  const ready = Array.from(accounts.values()).filter(a => a.state === 'ready' && a.sock);
+  const ready = Array.from(accounts.values()).filter(a => a.state === 'ready' && a.client);
   if (!ready.length) { io.emit('error_msg', { message: 'No connected accounts.' }); return; }
 
   isChecking = true; results = []; stats = { valid: 0, invalid: 0, total: numbers.length };
   let rrIndex = 0;
-  const delay = Math.max(500, Math.floor(1500 / ready.length));
+  const delay = Math.max(400, Math.floor(1200 / ready.length));
 
   for (let i = 0; i < numbers.length; i++) {
     if (!isChecking) break;
     const num = numbers[i].trim(); if (!num) continue;
-
     io.emit('progress', { current: i+1, total: numbers.length, percent: Math.round(((i+1)/numbers.length)*100) });
 
     let acc = null;
     for (let t = 0; t < ready.length; t++) {
       const c = ready[rrIndex % ready.length]; rrIndex++;
-      if (c?.state === 'ready' && c.sock) { acc = c; break; }
+      if (c?.state === 'ready' && c.client) { acc = c; break; }
     }
     if (!acc) {
       const r = { number: num, registered: false, error: 'No account', account: '—' };
@@ -280,14 +301,20 @@ app.get('/export', (req, res) => {
 // ── Sockets ───────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   broadcast();
-  socket.on('add_account', async () => {
+  socket.on('add_account', () => {
     if (accounts.size >= MAX_ACCOUNTS) return socket.emit('toast', { msg: `Max ${MAX_ACCOUNTS} accounts`, type: 'err' });
     const id = nextFreeId();
     if (!id || beingCreated.has(id)) return;
-    beingCreated.add(id); await createAccount(id);
+    beingCreated.add(id); createAccount(id);
   });
   socket.on('logout_account',  async ({ id }) => { await logoutAccount(parseInt(id)); });
-  socket.on('restart_account', async ({ id }) => { await restartAccount(parseInt(id)); });
+  socket.on('restart_account', async ({ id }) => {
+    const numId = parseInt(id);
+    const acc = accounts.get(numId); if (!acc) return;
+    acc.state = 'init'; broadcast();
+    await destroyBrowser(numId, false); accounts.delete(numId);
+    setTimeout(() => createAccount(numId), 2500);
+  });
   socket.on('check', ({ numbers }) => {
     if (!Array.from(accounts.values()).some(a => a.state === 'ready'))
       return socket.emit('error_msg', { message: 'No accounts connected.' });
@@ -300,14 +327,13 @@ io.on('connection', (socket) => {
 
 // ── Start ─────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-loadBaileys().then(() => {
-  server.listen(PORT, () => {
-    console.log(`\nWA Checker (Baileys) → http://localhost:${PORT}`);
-    createAccount(1);
-  });
-}).catch(err => {
-  console.error('Fatal:', err.message);
-  process.exit(1);
+server.listen(PORT, () => {
+  console.log(`\nWA Checker → http://localhost:${PORT}`);
+  // Log chrome path immediately so it's visible in deploy logs
+  const chrome = findChrome();
+  if (chrome) console.log(`[Chrome] Using: ${chrome}`);
+  else console.error('[Chrome] NOT FOUND — add puppeteer to package.json');
+  createAccount(1);
 });
 
 module.exports = app;

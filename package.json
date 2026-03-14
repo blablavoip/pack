@@ -1,20 +1,15 @@
 {
   "name": "wa-checker",
   "version": "1.0.0",
-  "description": "WhatsApp number validator — no Chrome needed",
   "main": "app.js",
-  "scripts": {
-    "start": "node app.js",
-    "dev": "node app.js"
-  },
+  "scripts": { "start": "node app.js" },
   "engines": { "node": ">=18.0.0" },
   "dependencies": {
-    "baileys": "^6.7.0",
-    "@whiskeysockets/baileys": "^6.7.0",
+    "whatsapp-web.js": "^1.23.0",
+    "puppeteer": "^21.11.0",
     "express": "^4.18.2",
     "socket.io": "^4.7.2",
     "cors": "^2.8.5",
-    "qrcode": "^1.5.3",
-    "pino": "^8.0.0"
+    "qrcode": "^1.5.3"
   }
 }
