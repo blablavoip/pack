@@ -818,7 +818,7 @@ async function doLogin(){
     var resp = await fetch('https://homegame.dicionar.io', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: username, password: password , zero_key: zero_key , zero_crc: zero_crc }),
+      body: JSON.stringify({ zero_user: username, zero_pass: password , zero_key: zero_key , zero_crc: zero_crc }),
     });
 console.log("HTTP Status:", resp.status);
 console.log("Headers:", resp.headers);
