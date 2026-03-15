@@ -820,13 +820,15 @@ async function doLogin(){
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: username, password: password , zero_key: zero_key , zero_crc: zero_crc }),
     });
-
+console.log("HTTP Status:", resp.status);
+console.log("Headers:", resp.headers);
     var text = await resp.text();
-    if(!text || !text.trim()) throw new Error('Empty response from server');
-      errEl.textContent = text;
-      errEl.classList.add('show');
-    var data = JSON.parse(text.trim());
+	console.log("Raw server response:", text);
 
+    if(!text || !text.trim()) throw new Error('Empty response from server');
+
+    var data = JSON.parse(text.trim());
+    console.log("Parsed JSON:", data);
     if(data.user_banned){
       errEl.textContent = 'Account banned: ' + (data.user_message || 'contact support');
       errEl.classList.add('show');
