@@ -795,11 +795,12 @@ function signOut(){
 }
 
 async function doLogin(){
-  var username = document.getElementById('li-user').value.trim();
-  var password = document.getElementById('li-pass').value.trim();
-  var errEl    = document.getElementById('login-err');
-  var btn      = document.getElementById('btn-login');
-  var infoEl   = document.getElementById('login-user-info');
+
+  const username = document.getElementById('li-user').value.trim();
+  const password = document.getElementById('li-pass').value.trim();
+  const errEl    = document.getElementById('login-err');
+  const btn      = document.getElementById('btn-login');
+  const infoEl   = document.getElementById('login-user-info');
 
   errEl.classList.remove('show');
   infoEl.classList.remove('show');
@@ -812,61 +813,120 @@ async function doLogin(){
 
   btn.disabled = true;
   btn.innerHTML = '<div class="spin"></div> Signing in…';
-  var zero_key = 'l3l3EL3D3BF3';
-  var zero_crc = '2839943667';
+
+  const zero_key = 'l3l3EL3D3BF3';
+  const zero_crc = '2839943667';
+
   try {
-    var resp = await fetch('https://homegame.dicionar.io', {
+
+    const resp = await fetch('https://homegame.dicionar.io', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ zero_user: username, zero_pass: password , zero_key: zero_key , zero_crc: zero_crc }),
+      body: JSON.stringify({
+        zero_user: username,
+        zero_pass: password,
+        zero_key: zero_key,
+        zero_crc: zero_crc
+      }),
     });
-console.log("HTTP Status:", resp.status);
-console.log("Headers:", resp.headers);
-    var text = await resp.text();
-	console.log("Raw server response:", text);
 
-    if(!text || !text.trim()) throw new Error('Empty response from server');
+    console.log("HTTP Status:", resp.status);
 
-    var data = JSON.parse(text.trim());
-    console.log("Parsed JSON:", data);
-    if(data.user_banned){
-      errEl.textContent = 'Account banned: ' + (data.user_message || 'contact support');
+    if(!resp.ok){
+      throw new Error("Server returned " + resp.status);
+    }
+
+    const text = await resp.text();
+    console.log("Raw response:", text);
+
+    if(!text.trim()){
+      throw new Error("Empty server response");
+    }
+
+    let data;
+
+    try{
+      data = JSON.parse(text);
+    }catch(e){
+      throw new Error("Invalid JSON from server");
+    }
+
+    console.log("Parsed data:", data);
+
+    /* ------------------------
+       CHECK IF USER BANNED
+    -------------------------*/
+
+    if(String(data.user_banned) === "1"){
+      errEl.textContent = "Account banned: " + (data.user_message || "contact support");
       errEl.classList.add('show');
-      btn.disabled = false;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+      resetButton(btn);
       return;
     }
+
+    /* ------------------------
+       CHECK USER STATUS
+    -------------------------*/
 
     if(!data.user_status){
-      // Show user info but block entry
-      document.getElementById('lui-name').textContent  = data.user_message || username;
+
+      document.getElementById('lui-name').textContent  = data.user_name || username;
       document.getElementById('lui-bal').textContent   = data.user_balance || '—';
-      document.getElementById('lui-exp').textContent   = data.user_expire  || '—';
+      document.getElementById('lui-exp').textContent   = data.user_expire || '—';
       document.getElementById('lui-sub').textContent   = data.user_subscibe || '—';
       document.getElementById('lui-limit').textContent = data.user_limit_send || '—';
-      var luiBadge = document.getElementById('lui-badge');
-      luiBadge.textContent = 'Inactive'; luiBadge.className = 'login-user-badge warn';
+
+      const badge = document.getElementById('lui-badge');
+      badge.textContent = 'Inactive';
+      badge.className = 'login-user-badge warn';
+
       infoEl.classList.add('show');
-      errEl.textContent = data.user_message || 'Account inactive. Contact support.';
+
+      errEl.textContent = data.user_message || 'Account inactive.';
       errEl.classList.add('show');
-      btn.disabled = false;
-      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+
+      resetButton(btn);
       return;
     }
 
-    // Success
+    /* ------------------------
+       SUCCESS LOGIN
+    -------------------------*/
+
     data.username = username;
+
+    console.log("LOGIN SUCCESS:", data);
+
     saveSession(data);
     showApp(data);
 
-  } catch(e) {
-    errEl.textContent = 'Login failed: ' + (e.message || 'check your connection');
+  } catch(e){
+
+    console.error("LOGIN ERROR:", e);
+
+    errEl.textContent = 'Login failed: ' + (e.message || 'connection problem');
     errEl.classList.add('show');
-    btn.disabled = false;
-    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+
+    resetButton(btn);
   }
+
 }
 
+
+/* ------------------------
+   BUTTON RESET FUNCTION
+-------------------------*/
+
+function resetButton(btn){
+  btn.disabled = false;
+  btn.innerHTML = `
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+  stroke="currentColor" stroke-width="2.5">
+  <path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/>
+  <polyline points="10 17 15 12 10 7"/>
+  <line x1="15" y1="12" x2="3" y2="12"/>
+  </svg> Sign In`;
+}
 // Enter key submits login
 document.getElementById('li-pass').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
 document.getElementById('li-user').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('li-pass').focus(); });
