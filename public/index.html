@@ -784,7 +784,9 @@ function showApp(data){
 
 function signOut(){
   clearSession();
+  const btn      = document.getElementById('btn-login');
   userSession = null;
+  resetButton(btn);
   document.getElementById('login-overlay').classList.remove('hidden');
   document.getElementById('user-bar').style.display='none';
   document.getElementById('li-user').value='';
@@ -830,15 +832,12 @@ async function doLogin(){
       }),
     });
 
-    console.log("HTTP Status:", resp.status);
 
     if(!resp.ok){
       throw new Error("Server returned " + resp.status);
     }
 
     const text = await resp.text();
-    console.log("Raw response:", text);
-
     if(!text.trim()){
       throw new Error("Empty server response");
     }
@@ -851,7 +850,7 @@ async function doLogin(){
       throw new Error("Invalid JSON from server");
     }
 
-    console.log("Parsed data:", data);
+
 
     /* ------------------------
        CHECK IF USER BANNED
@@ -895,7 +894,7 @@ async function doLogin(){
 
     data.username = username;
 
-    console.log("LOGIN SUCCESS:", data);
+ 
 
     saveSession(data);
     showApp(data);
