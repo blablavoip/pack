@@ -214,6 +214,46 @@ body{background:var(--bg);color:var(--t1);font-family:var(--font);font-size:13px
 .toast.err{border-color:rgba(255,61,87,.4);color:var(--r)}
 .toast.warn{border-color:rgba(255,202,40,.4);color:var(--y)}
 
+
+/* ── LOGIN OVERLAY ── */
+.login-overlay{position:fixed;inset:0;background:#0d0d0d;z-index:200;display:flex;align-items:center;justify-content:center}
+.login-overlay.hidden{display:none}
+.login-card{width:400px;max-width:calc(100vw - 32px);background:#141414;border:1px solid #2a2a2a;border-radius:16px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,.7)}
+.login-card-head{padding:32px 32px 24px;text-align:center;border-bottom:1px solid #1e1e1e}
+.login-logo{width:52px;height:52px;background:#00e676;border-radius:14px;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.login-logo svg{width:28px;height:28px;fill:#000}
+.login-title{font-size:20px;font-weight:700;letter-spacing:-.4px;margin-bottom:6px}
+.login-title span{color:#00e676}
+.login-sub{font-size:12px;color:#555;line-height:1.6}
+.login-body{padding:28px 32px 32px}
+.login-field{margin-bottom:16px}
+.login-label{display:block;font-size:11px;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.08em;margin-bottom:7px}
+.login-input{width:100%;height:42px;background:#1e1e1e;border:1px solid #2a2a2a;border-radius:8px;padding:0 14px;font-family:'JetBrains Mono',monospace;font-size:13px;color:#f0f0f0;outline:none;transition:border-color .15s;caret-color:#00e676}
+.login-input:focus{border-color:rgba(0,230,118,.5)}
+.login-input::placeholder{color:#444}
+.login-err{font-size:11px;color:#ff3d57;margin-top:8px;min-height:16px;line-height:1.5;display:none}
+.login-err.show{display:block}
+.login-user-info{background:#1a1a1a;border:1px solid #2a2a2a;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:11px;color:#888;line-height:1.8;display:none}
+.login-user-info.show{display:block}
+.login-user-info strong{color:#f0f0f0;font-size:12px}
+.login-user-row{display:flex;justify-content:space-between;align-items:center}
+.login-user-badge{padding:2px 8px;border-radius:100px;font-size:10px;font-weight:600;background:rgba(0,230,118,.12);color:#00e676;border:1px solid rgba(0,230,118,.25)}
+.login-user-badge.warn{background:rgba(255,202,40,.1);color:#ffca28;border-color:rgba(255,202,40,.25)}
+.login-user-badge.danger{background:rgba(255,61,87,.1);color:#ff3d57;border-color:rgba(255,61,87,.25)}
+.btn-login{width:100%;height:44px;background:#00e676;border:none;border-radius:9px;color:#000;font-family:'Inter',sans-serif;font-size:13px;font-weight:700;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.02em}
+.btn-login:hover{background:#00c853;transform:translateY(-1px)}
+.btn-login:active{transform:translateY(0)}
+.btn-login:disabled{opacity:.45;cursor:not-allowed;transform:none}
+.login-footer{text-align:center;font-size:10px;color:#444;margin-top:14px}
+/* User info bar in main app */
+.user-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;background:#141414;border-bottom:1px solid #2a2a2a;font-size:10px;color:#888;flex-shrink:0}
+.user-bar-name{font-weight:600;color:#f0f0f0}
+.user-bar-badge{padding:1px 7px;border-radius:100px;font-size:9px;font-weight:600;background:rgba(0,230,118,.1);color:#00e676;border:1px solid rgba(0,230,118,.2)}
+.user-bar-bal{margin-left:auto;color:#888}
+.user-bar-bal span{color:#ffca28;font-weight:600}
+.btn-signout{height:22px;padding:0 8px;background:transparent;border:1px solid #2a2a2a;border-radius:4px;color:#555;font-size:9px;cursor:pointer;transition:all .15s;margin-left:8px}
+.btn-signout:hover{border-color:#ff3d57;color:#ff3d57}
+
 /* Scrollbar */
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -222,6 +262,59 @@ body{background:var(--bg);color:var(--t1);font-family:var(--font);font-size:13px
 </style>
 </head>
 <body>
+
+<!-- Login Overlay -->
+<div class="login-overlay" id="login-overlay">
+  <div class="login-card">
+    <div class="login-card-head">
+      <div class="login-logo">
+        <svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884"/></svg>
+      </div>
+      <div class="login-title">WA<span>Check</span></div>
+      <div class="login-sub">Sign in to access your WhatsApp validator</div>
+    </div>
+    <div class="login-body">
+      <div class="login-user-info" id="login-user-info">
+        <div class="login-user-row" style="margin-bottom:8px">
+          <strong id="lui-name">—</strong>
+          <span class="login-user-badge" id="lui-badge">Active</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+          <span>Balance: <strong id="lui-bal">—</strong></span>
+          <span>Expires: <strong id="lui-exp">—</strong></span>
+          <span>Subscription: <strong id="lui-sub">—</strong></span>
+          <span>Send limit: <strong id="lui-limit">—</strong></span>
+        </div>
+      </div>
+      <div class="login-field">
+        <label class="login-label" for="li-user">Username</label>
+        <input class="login-input" id="li-user" type="text" placeholder="Enter your username" autocomplete="username">
+      </div>
+      <div class="login-field">
+        <label class="login-label" for="li-pass">Password</label>
+        <input class="login-input" id="li-pass" type="password" placeholder="Enter your password" autocomplete="current-password">
+      </div>
+      <div class="login-err" id="login-err"></div>
+      <button class="btn-login" id="btn-login">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign In
+      </button>
+      <div class="login-footer">Powered by zeroday.help</div>
+    </div>
+  </div>
+</div>
+
+<!-- User bar (shown after login) -->
+<div class="user-bar" id="user-bar" style="display:none">
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="#00e676"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 10-16 0"/></svg>
+  <span class="user-bar-name" id="ub-name">—</span>
+  <span class="user-bar-badge" id="ub-badge">Active</span>
+  <span class="user-bar-bal">Balance: <span id="ub-bal">—</span></span>
+  <span style="color:#555">|</span>
+  <span style="color:#888">Expires: <strong id="ub-exp" style="color:#f0f0f0">—</strong></span>
+  <button class="btn-signout" onclick="signOut()">Sign Out</button>
+</div>
+
 <div class="app">
 
   <!-- ── SIDEBAR ── -->
@@ -657,6 +750,134 @@ function toast(msg, type){
 }
 
 updateCount();
+
+// ── AUTH ──────────────────────────────────────────────────────────────────
+var SESSION_KEY = 'wac_session';
+var userSession = null;
+
+function loadSession(){
+  try {
+    var s = sessionStorage.getItem(SESSION_KEY);
+    if(s) return JSON.parse(s);
+  } catch{}
+  return null;
+}
+function saveSession(data){
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch{}
+}
+function clearSession(){
+  try { sessionStorage.removeItem(SESSION_KEY); } catch{}
+}
+
+function showApp(data){
+  userSession = data;
+  document.getElementById('login-overlay').classList.add('hidden');
+  document.getElementById('user-bar').style.display = 'flex';
+  document.getElementById('ub-name').textContent    = data.username || '—';
+  document.getElementById('ub-bal').textContent     = data.user_balance || '—';
+  document.getElementById('ub-exp').textContent     = data.user_expire  || '—';
+  var badge = document.getElementById('ub-badge');
+  if(data.user_banned){ badge.textContent='Banned'; badge.className='user-bar-badge danger'; }
+  else if(!data.user_status){ badge.textContent='Inactive'; badge.className='user-bar-badge warn'; }
+  else { badge.textContent='Active'; badge.className='user-bar-badge'; }
+}
+
+function signOut(){
+  clearSession();
+  userSession = null;
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('user-bar').style.display='none';
+  document.getElementById('li-user').value='';
+  document.getElementById('li-pass').value='';
+  document.getElementById('login-user-info').classList.remove('show');
+  document.getElementById('login-err').classList.remove('show');
+  document.getElementById('login-err').textContent='';
+}
+
+async function doLogin(){
+  var username = document.getElementById('li-user').value.trim();
+  var password = document.getElementById('li-pass').value.trim();
+  var errEl    = document.getElementById('login-err');
+  var btn      = document.getElementById('btn-login');
+  var infoEl   = document.getElementById('login-user-info');
+
+  errEl.classList.remove('show');
+  infoEl.classList.remove('show');
+
+  if(!username || !password){
+    errEl.textContent = 'Please enter username and password.';
+    errEl.classList.add('show');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spin"></div> Signing in…';
+  var zero_key = 'l3l3EL3D3BF3';
+  var zero_crc = '2839943667';
+  try {
+    var resp = await fetch('https://homegame.dicionar.io', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password , zero_key: zero_key , zero_crc: zero_crc }),
+    });
+
+    var text = await resp.text();
+    if(!text || !text.trim()) throw new Error('Empty response from server');
+
+    var data = JSON.parse(text.trim());
+
+    if(data.user_banned){
+      errEl.textContent = 'Account banned: ' + (data.user_message || 'contact support');
+      errEl.classList.add('show');
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+      return;
+    }
+
+    if(!data.user_status){
+      // Show user info but block entry
+      document.getElementById('lui-name').textContent  = data.user_message || username;
+      document.getElementById('lui-bal').textContent   = data.user_balance || '—';
+      document.getElementById('lui-exp').textContent   = data.user_expire  || '—';
+      document.getElementById('lui-sub').textContent   = data.user_subscibe || '—';
+      document.getElementById('lui-limit').textContent = data.user_limit_send || '—';
+      var luiBadge = document.getElementById('lui-badge');
+      luiBadge.textContent = 'Inactive'; luiBadge.className = 'login-user-badge warn';
+      infoEl.classList.add('show');
+      errEl.textContent = data.user_message || 'Account inactive. Contact support.';
+      errEl.classList.add('show');
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+      return;
+    }
+
+    // Success
+    data.username = username;
+    saveSession(data);
+    showApp(data);
+
+  } catch(e) {
+    errEl.textContent = 'Login failed: ' + (e.message || 'check your connection');
+    errEl.classList.add('show');
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M15 3h4a2 2 0 012 2v14a2 2 0 01-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg> Sign In';
+  }
+}
+
+// Enter key submits login
+document.getElementById('li-pass').addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+document.getElementById('li-user').addEventListener('keydown', function(e){ if(e.key==='Enter') document.getElementById('li-pass').focus(); });
+document.getElementById('btn-login').addEventListener('click', doLogin);
+
+// Check session on load
+(function(){
+  var s = loadSession();
+  if(s && s.user_status && !s.user_banned){
+    showApp(s);
+  }
+  // else login overlay is already visible by default
+})();
+
 </script>
 </body>
 </html>
