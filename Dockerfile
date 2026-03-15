@@ -1,29 +1,21 @@
-# Use official Puppeteer image — Chrome is pre-installed, no downloads needed
+# Use official Puppeteer image — Chrome pre-installed
 FROM ghcr.io/puppeteer/puppeteer:21.11.0
 
-# Set working directory
 WORKDIR /app
 
-# Run as root to install deps
 USER root
 
-# Copy package files
-COPY package.json ./
+# Increase shared memory — Chrome needs this for multiple instances
+RUN echo "tmpfs /dev/shm tmpfs defaults,size=512m 0 0" >> /etc/fstab 2>/dev/null || true
 
-# Install only app dependencies (NOT puppeteer — already in image)
+COPY package.json ./
 RUN npm install --omit=dev
 
-# Copy app files
 COPY . .
+RUN mkdir -p .wa-session && chmod -R 777 .wa-session && chmod -R 777 /app
 
-# Create session directory
-RUN mkdir -p .wa-session && chmod 777 .wa-session
+# Stay as root — avoids permission issues when spawning multiple Chrome processes
+USER root
 
-# Switch back to non-root user (required by puppeteer image)
-USER pptruser
-
-# Expose port
 EXPOSE 3000
-
-# Start
-CMD ["node", "app.js"]
+CMD ["node", "--max-old-space-size=512", "app.js"]
