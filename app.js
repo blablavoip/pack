@@ -148,15 +148,44 @@ async function logoutAccount(id) {
   const acc = accounts.get(id);
   if (!acc || acc.state === 'removing') return;
   acc.state = 'removing'; broadcast();
-  if (acc.client) {
-    await Promise.race([
-      (async () => { try { await acc.client.logout(); } catch {} })(),
-      new Promise(r => setTimeout(r, 5000)),
-    ]);
+
+  const client = acc.client;
+  acc.client = null; // detach immediately so no more events fire
+
+  if (client) {
+    try { client.removeAllListeners(); } catch {}
+
+    // Step 1: logout() — tells WhatsApp servers to unlink this device
+    // This is what removes it from the phone's Linked Devices list
+    try {
+      await Promise.race([
+        client.logout(),
+        new Promise(r => setTimeout(r, 8000)),
+      ]);
+      console.log(`[Account ${id}] logout() completed`);
+    } catch (e) {
+      console.log(`[Account ${id}] logout() error (continuing):`, e.message);
+    }
+
+    // Step 2: destroy() — kills the browser process
+    try {
+      await Promise.race([
+        client.destroy(),
+        new Promise(r => setTimeout(r, 5000)),
+      ]);
+    } catch {}
   }
-  await destroyBrowser(id, true);
-  accounts.delete(id); broadcast();
+
+  // Step 3: delete session files so it won't auto-reconnect
+  deleteSession(id);
+
+  // Step 4: clean up temp Chrome dir
+  try { fs.rmSync(`/tmp/chrome-wa-${id}`, { recursive: true, force: true }); } catch {}
+
+  accounts.delete(id);
+  broadcast();
   io.emit('toast', { msg: `Account ${id} logged out`, type: 'ok' });
+  console.log(`[Account ${id}] Fully logged out and removed`);
 }
 
 // ── Create account — fully isolated, no shared state between instances ─────
@@ -310,14 +339,14 @@ async function checkNumber(raw, acc) {
       return { number: raw, cleaned, e164: '+' + cleaned, registered: false,
         waLink: null, checkedAt: new Date().toISOString(), account: acc.label };
     }
-    const [picRes, contactRes, statusRes] = await Promise.allSettled([
+    const [picRes, contactRes] = await Promise.allSettled([
       acc.client.getProfilePicUrl(wid).catch(() => null),
       acc.client.getContactById(wid).catch(() => null),
-      acc.client.getStatus(wid).catch(() => null),
     ]);
     const pic         = picRes.value     || null;
     const contact     = contactRes.value || null;
-    const status      = statusRes.value  || null;
+    // getStatus() does not exist — read status from contact properties
+    const statusText  = contact?.statusMessage || contact?.about || contact?.status || null;
     const isBusiness  = contact?.isBusiness  ?? false;
     const isEnterprise= contact?.isEnterprise ?? false;
     const name        = contact?.pushname || contact?.name || null;
@@ -331,7 +360,7 @@ async function checkNumber(raw, acc) {
       profilePic: pic,
       isBusiness, isEnterprise, accountType,
       name,
-      status: (typeof status === 'object' ? status?.status : status) || null,
+      status: statusText,
       country: countryInfo.iso,
       countryCode: countryInfo.code,
       checkedAt: new Date().toISOString(), account: acc.label,
