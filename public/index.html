@@ -823,7 +823,8 @@ async function doLogin(){
 
     var text = await resp.text();
     if(!text || !text.trim()) throw new Error('Empty response from server');
-
+      errEl.textContent = text;
+      errEl.classList.add('show');
     var data = JSON.parse(text.trim());
 
     if(data.user_banned){
